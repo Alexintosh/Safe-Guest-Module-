@@ -5,9 +5,11 @@ import "forge-std/console.sol";
 import {Test} from "forge-std/Test.sol";
 import {GuestSigner} from "@src/Plugin.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@safe/Safe.sol";
 import "@safe/proxies/SafeProxy.sol";
 import {IAvatar} from "@src/IAvatar.sol";
+import {Enum} from "@safe/common/Enum.sol";
 
 contract MockToken is ERC20("USDBRR", "USDBRR") {
     function mint(address to, uint256 quantity) external returns (bool) {
@@ -40,7 +42,7 @@ contract GuestModTest is Test {
         safe = Safe(payable(address(new SafeProxy(safeImplementation))));
         mockToken = new MockToken();
 
-        //mockToken.mint(WhitelistedLiquidator, 1000000 ether);
+        mockToken.mint(address(safe), 1000000 ether);
 
         address[] memory owners = new address[](1);
         owners[0] = own1;
@@ -67,7 +69,7 @@ contract GuestModTest is Test {
         );
         
         // Creating  module
-        guestMod = new GuestSigner();
+        guestMod = new GuestSigner(address(safe));
 
         // Adding  module
         execCall(
@@ -83,7 +85,78 @@ contract GuestModTest is Test {
     }
 
     function testFuzz_AddingGuestWorks(uint256 beMyGuest) public {
-        //execCall( address(guestMod))
+        // Add guest
+        execCall(
+            own1,
+            address(guestMod),
+            abi.encodeWithSelector(GuestSigner.setGuest.selector, guest, (block.timestamp + 10 days))
+        );
+
+        console.log("guest", guestMod.tempSigner());
+        assertEq(guestMod.tempSigner(), guest);
+    }
+
+    function testFuzz_guestCannotDoAnythingBeforePermission(uint256 beMyGuest) public {
+        //Executing as guest
+        vm.prank(guest);
+        vm.expectRevert("too late");
+        guestMod.executeFromGuest(
+            address(mockToken), 
+            0, 
+            abi.encodeWithSelector(IERC20.approve.selector, guest, 1 ether), 
+            Enum.Operation.Call
+        );
+    }
+
+    function testFuzz_canDoAnythingAfterPermission(uint256 beMyGuest) public {
+        //Setting guest
+        execCall(
+            own1,
+            address(guestMod),
+            abi.encodeWithSelector(GuestSigner.setGuest.selector, guest, (block.timestamp + 10 days))
+        );
+
+        console.log("after", block.timestamp);
+        console.log("from module", guestMod.timestamp());
+
+        //Executing as guest
+        vm.prank(guest);
+        guestMod.executeFromGuest(
+            address(mockToken), 
+            0, 
+            abi.encodeWithSelector(IERC20.approve.selector, guest, 1 ether), 
+            Enum.Operation.Call
+        );
+    }
+
+    function testFuzz_cantDoAnythingAfterTimestampExpired(uint256 beMyGuest) public {
+        //Setting guest
+        vm.warp(0);
+
+        execCall(
+            own1,
+            address(guestMod),
+            abi.encodeWithSelector(GuestSigner.setGuest.selector, guest, (block.timestamp + 1 hours))
+        );
+
+        //Going the FUTOOOR
+        vm.warp((block.timestamp + 1 days));
+
+
+        //Executing as guest
+        vm.prank(guest);
+        vm.expectRevert("too late");
+        guestMod.executeFromGuest(
+            address(mockToken), 
+            0, 
+            abi.encodeWithSelector(IERC20.approve.selector, guest, 1 ether), 
+            Enum.Operation.Call
+        );
+    }
+
+    function testFuzz_setGuestRevertsIfNotSafeCalling(uint256 beMyGuest) public {
+        vm.expectRevert("!safe");
+        guestMod.setGuest(guest, (block.timestamp + 10 days));
     }
 
     function execCall(

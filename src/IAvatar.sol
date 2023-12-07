@@ -22,6 +22,8 @@ interface IAvatar {
     /// @param module Module to be removed.
     function disableModule(address prevModule, address module) external;
 
+    function isOwner(address owner) external view returns (bool);
+
     /// @dev Allows a Module to execute a transaction.
     /// @notice Can only be called by an enabled module.
     /// @notice Must emit ExecutionFromModuleSuccess(address module) if successful.
